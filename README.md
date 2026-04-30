@@ -185,23 +185,26 @@ Este plugin é disponibilizado sob a GNU General Public License v3.0 ou posterio
 
 ## Autor
 
-Your Name  
-your.email@example.com
+João Miguel Martins 
+joao_martins@yahoo.com
 
 ## Histórico de Versões
 
-**3.0** - Diálogo de configuração flexível
+**4.0** - Diálogo de configuração flexível
 - Seleção livre da camada de entrada (qualquer nome)
 - Seleção livre dos campos PAP, raio de copa e alt_1m (qualquer nome)
 - Criação automática do campo raio de copa se não existir na camada
 - Passo de cálculo saltado automaticamente quando o raio de copa já tem valores
 - Diálogo recorda a última configuração utilizada
 
-**2.0** - Atualização major
+**3.0** - Atualização major
 - Separação de áreas por limiar de 0.5 ha antes da análise
 - Aplicação de critérios de densidade a pequenos núcleos
 - Nova camada OUTROS para áreas que não cumprem limiares
 - Campo pap_class adicionado aos outputs
+
+**2.0** - Alteração minor
+- Pequenos ajustes no código
 
 **1.0** - Lançamento inicial
 - Cálculo de raio de copa a partir de PAP
