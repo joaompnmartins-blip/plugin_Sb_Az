@@ -13,6 +13,12 @@ Este plugin processa dados de inventário florestal para criar múltiplas camada
 5. **PEQUENO_NUCLEO** - Pequenos núcleos < 0.5 ha que cumprem limiares de densidade
 6. **OUTROS** - Áreas < 0.5 ha que não cumprem limiares de densidade
 
+Opcionalmente, com selecção de camadas de infraestruturas:
+
+7. **INFRAESTRUTURAS_TOTAL** - União dissolvida das infraestruturas seleccionadas
+8. **AREAS_AFECTADAS** - Interseção entre POVOAMENTO e infraestruturas
+9. **SB_AZ_AFECTADOS** - Árvores directamente sobrepostas por infraestruturas
+
 ## Requisitos
 
 - QGIS 3.0 ou superior
@@ -50,7 +56,7 @@ Este plugin processa dados de inventário florestal para criar múltiplas camada
 3. No **diálogo de configuração**, selecione a camada e os campos adequados
 4. Clique em **OK** para iniciar a análise
 5. Aguarde a conclusão — o progresso é mostrado em tempo real
-6. O plugin cria até 6 novas camadas no projeto
+6. O plugin cria até 6 camadas de base, mais até 3 camadas adicionais se a opção de afectação estiver activa
 
 ## Diálogo de Configuração
 
@@ -69,6 +75,15 @@ Ao executar o plugin, é apresentado um diálogo com as seguintes opções:
 - **"Calcular de PAP (criar campo)"**: o campo raio de copa é criado na camada caso não exista, e calculado a partir do campo PAP; o campo PAP é obrigatório
 
 O diálogo recorda a última configuração utilizada.
+
+### Cálculo de Afectação de Infraestruturas (opcional)
+
+O diálogo inclui uma opção opcional para calcular a afectação de infraestruturas sobre as áreas de povoamento:
+
+- **Activar**: marque a caixa *"Calcular afectação de infraestruturas (opcional)"*
+- **Seleccionar camadas**: escolha uma ou mais camadas de polígonos que representam infraestruturas (estradas, caminhos, edificações, etc.)
+- A selecção de múltiplas camadas é suportada — todas são combinadas antes da análise
+- Apenas camadas de polígonos são aceites; camadas de outro tipo causarão erro
 
 ## Camadas de Saída
 
@@ -117,6 +132,19 @@ Critério de inclusão: densidade > limiar da classe de PAP (50 / 30 / 20 / 10 �
 - **n_outros**: ID sequencial
 - **area_ha**, **n_total**, **dens_arv**, **avg_PAP**, **pap_class**
 
+### INFRAESTRUTURAS_TOTAL *(criada apenas se a opção de afectação estiver activa)*
+União dissolvida de todas as camadas de infraestruturas seleccionadas no diálogo.
+
+### AREAS_AFECTADAS *(criada apenas se existir POVOAMENTO e sobreposição com infraestruturas)*
+Intersecção entre a camada POVOAMENTO e as infraestruturas.
+- **area_ha_afect**: Área afectada em hectares
+- Todos os campos herdados de POVOAMENTO
+
+### SB_AZ_AFECTADOS *(criada apenas se existirem árvores directamente sobre infraestruturas)*
+Pontos de inventário (Sb/Az) que se sobrepõem directamente às infraestruturas.
+- **POV_ISO**: classificação da árvore — `'povoamento'` (dentro de uma área POVOAMENTO) ou `'isolados'` (fora)
+- Todos os campos originais da camada de entrada
+
 ## Fórmulas
 
 ### Cálculo do Raio de Copa
@@ -139,7 +167,7 @@ Se avg_PAP ≥ 130:  pap_class = 4
 
 ## Fluxo de Trabalho
 
-1. **Configuração**: selecionar camada e campos no diálogo
+1. **Configuração**: selecionar camada e campos no diálogo; activar opcionalmente o cálculo de afectação
 2. **Passo 1**: Calcular raio de copa a partir de PAP *(saltado automaticamente se o campo já tiver valores)*
 3. **Passo 2**: Criar buffers de copa individuais
 4. **Passo 3**: Criar camada de continuidade (buffer 10m dissolvido)
@@ -147,6 +175,7 @@ Se avg_PAP ≥ 130:  pap_class = 4
 6. **Passo 4**: Analisar classes de PAP (apenas áreas ≥ 0.5 ha)
 7. **Passo 5**: Criar camada POVOAMENTO
 8. **Passo 6**: Classificar pequenos núcleos em PEQUENO_NUCLEO ou OUTROS
+9. **Passo 7** *(opcional)*: Calcular afectação de infraestruturas — criar INFRAESTRUTURAS_TOTAL, AREAS_AFECTADAS e SB_AZ_AFECTADOS
 
 ## Resolução de Problemas
 
@@ -172,6 +201,15 @@ Se avg_PAP ≥ 130:  pap_class = 4
 - A análise realiza junções espaciais para cada polígono; conjuntos de dados grandes podem demorar vários minutos
 - Verifique o registo de mensagens do QGIS para acompanhar o progresso
 
+**Erro "camada não é de polígonos" no passo de afectação**
+- Apenas camadas de polígonos são suportadas como infraestruturas; verifique o tipo de geometria das camadas seleccionadas
+
+**Nenhuma camada AREAS_AFECTADAS criada**
+- Normal se não existir POVOAMENTO ou se as infraestruturas não se sobrepuserem a nenhuma área de povoamento
+
+**Nenhuma camada SB_AZ_AFECTADOS criada**
+- Normal se nenhuma árvore se sobrepuser directamente às infraestruturas seleccionadas
+
 ## Suporte
 
 Para problemas ou questões:
@@ -189,6 +227,14 @@ João Miguel Martins
 joao_martins@yahoo.com
 
 ## Histórico de Versões
+
+**5.0** - Cálculo de afectação de infraestruturas
+- Opção opcional para calcular a afectação directa de infraestruturas sobre os povoamentos
+- Selecção de múltiplas camadas de polígonos de infraestruturas no diálogo de configuração
+- Nova camada INFRAESTRUTURAS_TOTAL (união dissolvida de todas as camadas seleccionadas)
+- Nova camada AREAS_AFECTADAS (intersecção de POVOAMENTO com infraestruturas, com campo area_ha_afect)
+- Nova camada SB_AZ_AFECTADOS (árvores directamente sobre infraestruturas, classificadas por POV_ISO)
+- Diálogo recorda as selecções de infraestruturas da última configuração
 
 **4.0** - Diálogo de configuração flexível
 - Seleção livre da camada de entrada (qualquer nome)
