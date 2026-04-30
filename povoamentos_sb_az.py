@@ -2,11 +2,13 @@
 Povoamentos Sb Az Plugin - Main Plugin Class
 """
 
-from qgis.PyQt.QtCore import QCoreApplication, QVariant
+from qgis.PyQt.QtCore import QCoreApplication, QVariant, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (QAction, QMessageBox, QProgressDialog,
                                   QDialog, QFormLayout, QLabel,
-                                  QComboBox, QDialogButtonBox, QFrame)
+                                  QComboBox, QDialogButtonBox, QFrame,
+                                  QCheckBox, QGroupBox, QListWidget,
+                                  QListWidgetItem, QVBoxLayout)
 from qgis.core import (QgsProject, QgsVectorLayer, QgsProcessing, QgsProperty,
                        QgsField, QgsMessageLog, Qgis, QgsFeature, QgsWkbTypes)
 import processing
@@ -31,7 +33,7 @@ class LayerConfigDialog(QDialog):
         layout.setSpacing(10)
         self.setLayout(layout)
 
-        # Layer
+        # --- Main layer ---
         self.layer_combo = QComboBox()
         self._populate_layers()
         layout.addRow('Camada de entrada:', self.layer_combo)
@@ -45,7 +47,6 @@ class LayerConfigDialog(QDialog):
         self.raio_copa_combo = QComboBox()
         layout.addRow('Campo raio de copa:', self.raio_copa_combo)
 
-        # PAP — label text changes depending on raio_copa selection
         self.pap_label = QLabel('Campo PAP:')
         self.pap_combo = QComboBox()
         layout.addRow(self.pap_label, self.pap_combo)
@@ -64,13 +65,48 @@ class LayerConfigDialog(QDialog):
         self.alt_1m_combo = QComboBox()
         layout.addRow('Campo alt_1m (booleano):', self.alt_1m_combo)
 
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.HLine)
+        sep3.setFrameShadow(QFrame.Sunken)
+        layout.addRow(sep3)
+
+        # --- Optional affectation section ---
+        self.afect_check = QCheckBox(
+            'Calcular afectação de infraestruturas (opcional)')
+        layout.addRow(self.afect_check)
+
+        self.infra_group = QGroupBox('Camadas de infraestruturas (polígonos)')
+        infra_layout = QVBoxLayout()
+        infra_layout.setSpacing(4)
+
+        self.infra_list = QListWidget()
+        self.infra_list.setMaximumHeight(130)
+        self.infra_list.setMinimumHeight(80)
+        self._populate_infra_layers()
+        infra_layout.addWidget(self.infra_list)
+
+        infra_note = QLabel(
+            'Selecione uma ou mais camadas de polígonos. '
+            'Camadas não-polígono causarão erro.')
+        infra_note.setWordWrap(True)
+        infra_note.setStyleSheet('color: #555; font-style: italic;')
+        infra_layout.addWidget(infra_note)
+
+        self.infra_group.setLayout(infra_layout)
+        self.infra_group.setVisible(False)
+        layout.addRow(self.infra_group)
+
+        # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._validate_and_accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
+        # Connections
         self.layer_combo.currentIndexChanged.connect(self._on_layer_changed)
         self.raio_copa_combo.currentIndexChanged.connect(self._on_raio_copa_changed)
+        self.afect_check.toggled.connect(self.infra_group.setVisible)
+
         self._on_layer_changed()
 
     def _populate_layers(self):
@@ -79,6 +115,17 @@ class LayerConfigDialog(QDialog):
             if (hasattr(layer, 'geometryType') and
                     layer.geometryType() == QgsWkbTypes.PointGeometry):
                 self.layer_combo.addItem(layer.name(), layer_id)
+
+    def _populate_infra_layers(self):
+        self.infra_list.clear()
+        for layer_id, layer in QgsProject.instance().mapLayers().items():
+            if (hasattr(layer, 'geometryType') and
+                    layer.geometryType() == QgsWkbTypes.PolygonGeometry):
+                item = QListWidgetItem(layer.name())
+                item.setData(Qt.UserRole, layer_id)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.infra_list.addItem(item)
 
     def _on_layer_changed(self):
         layer_id = self.layer_combo.currentData()
@@ -147,7 +194,20 @@ class LayerConfigDialog(QDialog):
             QMessageBox.warning(self, 'Erro',
                 'Não foram encontrados campos para o campo alt_1m.')
             return
+        if self.afect_check.isChecked() and not self._get_selected_infra_ids():
+            QMessageBox.warning(self, 'Erro',
+                'Selecione pelo menos uma camada de infraestruturas, '
+                'ou desactive a opção de afectação.')
+            return
         self.accept()
+
+    def _get_selected_infra_ids(self):
+        selected = []
+        for i in range(self.infra_list.count()):
+            item = self.infra_list.item(i)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.data(Qt.UserRole))
+        return selected
 
     def _restore_config(self, config):
         idx = self.layer_combo.findData(config.get('layer_id'))
@@ -176,6 +236,17 @@ class LayerConfigDialog(QDialog):
             if idx >= 0:
                 self.alt_1m_combo.setCurrentIndex(idx)
 
+        # Restore affectation
+        calc_afect = config.get('calc_afectacao', False)
+        self.afect_check.setChecked(calc_afect)
+        self.infra_group.setVisible(calc_afect)
+
+        infra_ids = set(config.get('infra_layer_ids', []))
+        for i in range(self.infra_list.count()):
+            item = self.infra_list.item(i)
+            item.setCheckState(
+                Qt.Checked if item.data(Qt.UserRole) in infra_ids else Qt.Unchecked)
+
     def get_config(self):
         raio_copa_data = self.raio_copa_combo.currentData()
         needs_calc = raio_copa_data == self._CALC
@@ -186,6 +257,8 @@ class LayerConfigDialog(QDialog):
             'raio_copa_field': 'raio_copa' if needs_calc else raio_copa_data,
             'alt_1m_field': self.alt_1m_combo.currentData(),
             'needs_calculation': needs_calc,
+            'calc_afectacao': self.afect_check.isChecked(),
+            'infra_layer_ids': self._get_selected_infra_ids(),
         }
 
 
@@ -204,6 +277,8 @@ class PovoamentosSbAzPlugin:
         self.raio_copa_field = 'raio_copa'
         self.alt_1m_field = 'alt_1m'
         self.needs_calculation = True
+        self.calc_afectacao = False
+        self.infra_layer_ids = []
 
         # Output layer names
         self.BUFFER_LAYER_NAME = 'LIMITE_COPAS'
@@ -257,6 +332,8 @@ class PovoamentosSbAzPlugin:
             'raio_copa_field': self.raio_copa_field,
             'alt_1m_field': self.alt_1m_field,
             'needs_calculation': self.needs_calculation,
+            'calc_afectacao': self.calc_afectacao,
+            'infra_layer_ids': self.infra_layer_ids,
         }
         dlg = LayerConfigDialog(self.iface.mainWindow(), current_config)
         if dlg.exec_() != QDialog.Accepted:
@@ -267,6 +344,8 @@ class PovoamentosSbAzPlugin:
         self.raio_copa_field = cfg['raio_copa_field']
         self.alt_1m_field = cfg['alt_1m_field']
         self.needs_calculation = cfg['needs_calculation']
+        self.calc_afectacao = cfg['calc_afectacao']
+        self.infra_layer_ids = cfg['infra_layer_ids']
         return True
 
     def run(self):
@@ -275,17 +354,15 @@ class PovoamentosSbAzPlugin:
         if not self._show_config_dialog():
             return
 
-        layer = QgsProject.instance().mapLayer(self.layer_id)
-        layer_name = layer.name() if layer else '?'
-
-        progress = QProgressDialog('A Processar...', 'Cancelar', 0, 6,
+        total_steps = 7 if self.calc_afectacao else 6
+        progress = QProgressDialog('A Processar...', 'Cancelar', 0, total_steps,
                                    self.iface.mainWindow())
         progress.setWindowTitle('Análise de Povoamentos')
         progress.setModal(True)
         progress.show()
 
         try:
-            # Step 1: Calculate raio de copa (skipped if values already present)
+            # Step 1
             if self.needs_calculation:
                 progress.setLabelText('Passo 1/6: Calcular raio de copa...')
                 progress.setValue(1)
@@ -303,7 +380,7 @@ class PovoamentosSbAzPlugin:
             if progress.wasCanceled():
                 return
 
-            # Step 2: Create buffer layer
+            # Step 2
             progress.setLabelText('Passo 2/6: Criar buffers copas...')
             progress.setValue(2)
             QCoreApplication.processEvents()
@@ -313,7 +390,7 @@ class PovoamentosSbAzPlugin:
             if progress.wasCanceled():
                 return
 
-            # Step 3: Create continuidade layer
+            # Step 3
             progress.setLabelText('Passo 3/6: Criar buffer dissolvido de 10m...')
             progress.setValue(3)
             QCoreApplication.processEvents()
@@ -323,40 +400,42 @@ class PovoamentosSbAzPlugin:
             if progress.wasCanceled():
                 return
 
-            # Step 3.5: Split by 0.5 ha threshold
+            # Step 3.5
             progress.setLabelText('Passo 3.5/6: Separar áreas por tamanho (0.5 ha)...')
             QCoreApplication.processEvents()
-            large_areas_layer, small_areas_layer = self.split_by_area_threshold(continuidade_layer)
+            large_areas_layer, small_areas_layer = self.split_by_area_threshold(
+                continuidade_layer)
             self.log(f'Áreas separadas: {large_areas_layer.featureCount()} ≥ 0.5 ha, '
                      f'{small_areas_layer.featureCount()} < 0.5 ha')
 
             if progress.wasCanceled():
                 return
 
-            # Step 4: Create CLASSES_PAP layer
+            # Step 4
             progress.setLabelText('Passo 4/6: Analisando classes de PAP (áreas ≥ 0.5 ha)...')
             progress.setValue(4)
             QCoreApplication.processEvents()
-            classes_pap_layer, source_layer = self.create_classes_pap_layer(large_areas_layer)
+            classes_pap_layer, source_layer = self.create_classes_pap_layer(
+                large_areas_layer)
             self.log(f'Passo 4 completo: {classes_pap_layer.featureCount()} polígonos')
 
             if progress.wasCanceled():
                 return
 
-            # Step 5: Create POVOAMENTO layer
+            # Step 5
             progress.setLabelText('Passo 5/6: Criar camada POVOAMENTO...')
             progress.setValue(5)
             QCoreApplication.processEvents()
             povoamento_layer = self.create_povoamento_layer(classes_pap_layer)
             if povoamento_layer:
-                self.log(f'Passo 5 completo: {povoamento_layer.featureCount()} áreas de povoamento')
+                self.log(f'Passo 5 completo: {povoamento_layer.featureCount()} áreas')
             else:
                 self.log('Passo 5 completo: Nenhuma área encontrada')
 
             if progress.wasCanceled():
                 return
 
-            # Step 6: Create PEQUENO_NUCLEO layer
+            # Step 6
             progress.setLabelText('Passo 6/6: Criar camada PEQUENO_NUCLEO...')
             progress.setValue(6)
             QCoreApplication.processEvents()
@@ -367,12 +446,26 @@ class PovoamentosSbAzPlugin:
             else:
                 self.log('Passo 6: Nenhum pequeno núcleo encontrado')
             if outros_layer and outros_layer.featureCount() > 0:
-                self.log(f'Passo 6 completo: {outros_layer.featureCount()} outros')
-            else:
-                self.log('Passo 6: Nenhum outro núcleo encontrado')
+                self.log(f'Passo 6: {outros_layer.featureCount()} outros')
 
-            progress.setValue(6)
+            # Step 7 (optional)
+            areas_afectadas = None
+            sb_az_afectados = None
+            if self.calc_afectacao and self.infra_layer_ids:
+                progress.setLabelText('Passo 7/7: Calcular afectação de infraestruturas...')
+                progress.setValue(7)
+                QCoreApplication.processEvents()
+                areas_afectadas, sb_az_afectados = self.create_afectacao_layers(
+                    povoamento_layer, source_layer)
+                if areas_afectadas:
+                    self.log(f'Passo 7 completo: {areas_afectadas.featureCount()} '
+                             'áreas afectadas')
+                else:
+                    self.log('Passo 7: Nenhuma área de povoamento afectada')
 
+            progress.setValue(total_steps)
+
+            # Build summary
             layers_created = [self.BUFFER_LAYER_NAME, self.CONTINUIDADE_LAYER_NAME,
                               self.CLASSES_PAP_LAYER_NAME]
             if povoamento_layer:
@@ -381,6 +474,11 @@ class PovoamentosSbAzPlugin:
                 layers_created.append('PEQUENO_NUCLEO')
             if outros_layer and outros_layer.featureCount() > 0:
                 layers_created.append('OUTROS')
+            if areas_afectadas:
+                layers_created.append('INFRAESTRUTURAS_TOTAL')
+                layers_created.append('AREAS_AFECTADAS')
+            if sb_az_afectados:
+                layers_created.append('SB_AZ_AFECTADOS')
 
             QMessageBox.information(
                 self.iface.mainWindow(),
@@ -403,11 +501,9 @@ class PovoamentosSbAzPlugin:
         layer = QgsProject.instance().mapLayer(self.layer_id)
         if not layer:
             raise Exception('Camada não encontrada no projecto')
-
         if layer.fields().indexOf(self.pap_field) == -1:
             raise Exception(f"Campo PAP '{self.pap_field}' não encontrado na camada")
 
-        # Create target field if it does not exist
         if layer.fields().indexOf(self.raio_copa_field) == -1:
             layer.startEditing()
             rc_field = QgsField(self.raio_copa_field, QVariant.Double)
@@ -436,7 +532,6 @@ class PovoamentosSbAzPlugin:
     def create_buffer_layer(self):
         """Step 2: Create buffer layer using the raio de copa field."""
         layer = QgsProject.instance().mapLayer(self.layer_id)
-
         buffer_result = processing.run('native:buffer', {
             'INPUT': layer,
             'DISTANCE': QgsProperty.fromField(self.raio_copa_field),
@@ -447,7 +542,6 @@ class PovoamentosSbAzPlugin:
             'DISSOLVE': False,
             'OUTPUT': 'memory:'
         })
-
         buffer_layer = buffer_result['OUTPUT']
         buffer_layer.setName(self.BUFFER_LAYER_NAME)
         QgsProject.instance().addMapLayer(buffer_layer)
@@ -455,29 +549,17 @@ class PovoamentosSbAzPlugin:
 
     def create_continuidade_layer(self, buffer_layer):
         """Step 3: Create 10m dissolved buffer layer."""
-
         dissolved_result = processing.run('native:dissolve', {
-            'INPUT': buffer_layer,
-            'FIELD': [],
-            'OUTPUT': 'memory:'
+            'INPUT': buffer_layer, 'FIELD': [], 'OUTPUT': 'memory:'
         })
-        dissolved_layer = dissolved_result['OUTPUT']
-
         buffer_10m_result = processing.run('native:buffer', {
-            'INPUT': dissolved_layer,
-            'DISTANCE': 10,
-            'SEGMENTS': 16,
-            'END_CAP_STYLE': 0,
-            'JOIN_STYLE': 0,
-            'MITER_LIMIT': 2,
-            'DISSOLVE': True,
-            'OUTPUT': 'memory:'
+            'INPUT': dissolved_result['OUTPUT'],
+            'DISTANCE': 10, 'SEGMENTS': 16,
+            'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
+            'MITER_LIMIT': 2, 'DISSOLVE': True, 'OUTPUT': 'memory:'
         })
-        buffer_10m_layer = buffer_10m_result['OUTPUT']
-
         singlepart_result = processing.run('native:multiparttosingleparts', {
-            'INPUT': buffer_10m_layer,
-            'OUTPUT': 'memory:'
+            'INPUT': buffer_10m_result['OUTPUT'], 'OUTPUT': 'memory:'
         })
         continuidade_layer = singlepart_result['OUTPUT']
         continuidade_layer.setName(self.CONTINUIDADE_LAYER_NAME)
@@ -485,18 +567,15 @@ class PovoamentosSbAzPlugin:
         continuidade_layer.startEditing()
         if continuidade_layer.fields().indexOf('area_ha') == -1:
             field = QgsField('area_ha', QVariant.Double)
-            field.setLength(10)
-            field.setPrecision(4)
+            field.setLength(10); field.setPrecision(4)
             continuidade_layer.addAttribute(field)
         continuidade_layer.updateFields()
         area_idx = continuidade_layer.fields().indexOf('area_ha')
-
         for feature in continuidade_layer.getFeatures():
             geom = feature.geometry()
             if geom:
                 continuidade_layer.changeAttributeValue(
                     feature.id(), area_idx, geom.area() / 10000)
-
         continuidade_layer.commitChanges()
         QgsProject.instance().addMapLayer(continuidade_layer)
         return continuidade_layer
@@ -505,20 +584,17 @@ class PovoamentosSbAzPlugin:
         """Step 3.5: Split polygons by 0.5 ha threshold."""
         large_result = processing.run('native:extractbyexpression', {
             'INPUT': continuidade_layer,
-            'EXPRESSION': '"area_ha" >= 0.5',
-            'OUTPUT': 'memory:'
+            'EXPRESSION': '"area_ha" >= 0.5', 'OUTPUT': 'memory:'
         })
         large_areas_layer = large_result['OUTPUT']
         large_areas_layer.setName('AREAS_GRANDES')
 
         small_result = processing.run('native:extractbyexpression', {
             'INPUT': continuidade_layer,
-            'EXPRESSION': '"area_ha" < 0.5',
-            'OUTPUT': 'memory:'
+            'EXPRESSION': '"area_ha" < 0.5', 'OUTPUT': 'memory:'
         })
         small_areas_layer = small_result['OUTPUT']
         small_areas_layer.setName('AREAS_PEQUENAS')
-
         return large_areas_layer, small_areas_layer
 
     def create_classes_pap_layer(self, continuidade_layer):
@@ -527,12 +603,10 @@ class PovoamentosSbAzPlugin:
 
         final_result = processing.run('native:extractbyexpression', {
             'INPUT': continuidade_layer,
-            'EXPRESSION': '"area_ha" > 0.5',
-            'OUTPUT': 'memory:'
+            'EXPRESSION': '"area_ha" > 0.5', 'OUTPUT': 'memory:'
         })
         final_layer = final_result['OUTPUT']
         final_layer.setName(self.CLASSES_PAP_LAYER_NAME)
-
         final_layer.startEditing()
 
         pap_classes = [
@@ -578,7 +652,6 @@ class PovoamentosSbAzPlugin:
 
         final_layer.updateFields()
 
-        # Remove any fields not belonging to our output schema
         output_fields = {
             'area_ha', 'pap_class', 'Povoamento', 'Pov_Repescagem',
             'n_total', 'dens_total', 'avg_total',
@@ -596,7 +669,6 @@ class PovoamentosSbAzPlugin:
             final_layer.deleteAttributes(ids_to_remove)
             final_layer.updateFields()
 
-        # Build field index map
         fidx = {}
         for class_name, _, _, _ in pap_classes:
             fidx[f'n_{class_name}']    = final_layer.fields().indexOf(f'n_{class_name}')
@@ -611,7 +683,6 @@ class PovoamentosSbAzPlugin:
         for poly_feature in final_layer.getFeatures():
             poly_geom = poly_feature.geometry()
             poly_area = poly_feature['area_ha']
-
             class_data = {cn: {'count': 0, 'sum_pap': 0} for cn, *_ in pap_classes}
             total_count = 0
             total_sum_pap = 0
@@ -639,12 +710,12 @@ class PovoamentosSbAzPlugin:
                 final_layer.changeAttributeValue(
                     poly_feature.id(), fidx[f'n_{class_name}'], count)
                 if count > 0:
-                    avg_pap = class_data[class_name]['sum_pap'] / count
                     final_layer.changeAttributeValue(
-                        poly_feature.id(), fidx[f'avg_{class_name}'], avg_pap)
-                    density = count / poly_area if poly_area > 0 else 0
+                        poly_feature.id(), fidx[f'avg_{class_name}'],
+                        class_data[class_name]['sum_pap'] / count)
                     final_layer.changeAttributeValue(
-                        poly_feature.id(), fidx[f'dens_{class_name}'], density)
+                        poly_feature.id(), fidx[f'dens_{class_name}'],
+                        count / poly_area if poly_area > 0 else 0)
                 else:
                     final_layer.changeAttributeValue(
                         poly_feature.id(), fidx[f'avg_{class_name}'], None)
@@ -661,22 +732,13 @@ class PovoamentosSbAzPlugin:
                 avg_total = total_sum_pap / total_count
                 final_layer.changeAttributeValue(
                     poly_feature.id(), fidx['avg_total'], avg_total)
-
-                if avg_total < 30:
-                    pap_class = 1
-                elif avg_total < 80:
-                    pap_class = 2
-                elif avg_total < 130:
-                    pap_class = 3
-                else:
-                    pap_class = 4
-
+                pap_class = (1 if avg_total < 30 else
+                             2 if avg_total < 80 else
+                             3 if avg_total < 130 else 4)
                 final_layer.changeAttributeValue(
                     poly_feature.id(), fidx['pap_class'], pap_class)
-
                 total_density = total_count / poly_area if poly_area > 0 else 0
-                threshold = class_thresholds.get(pap_class, 0)
-                pov_rep = 'Sim' if total_density > threshold else 'Não'
+                pov_rep = 'Sim' if total_density > class_thresholds.get(pap_class, 0) else 'Não'
                 final_layer.changeAttributeValue(
                     poly_feature.id(), fidx['Pov_Repescagem'], pov_rep)
             else:
@@ -687,14 +749,13 @@ class PovoamentosSbAzPlugin:
                 final_layer.changeAttributeValue(
                     poly_feature.id(), fidx['Pov_Repescagem'], 'Não')
 
-            # Povoamento based on per-class density thresholds
             dens = {cn: class_data[cn]['count'] / poly_area if poly_area > 0 else 0
                     for cn, *_ in pap_classes}
-            if (dens['under_30'] > 50 or dens['pap_30_79'] > 30 or
-                    dens['pap_80_129'] > 20 or dens['over_129'] > 10):
-                povoamento_value = 'Sim'
-            else:
-                povoamento_value = 'Não'
+            povoamento_value = (
+                'Sim' if (dens['under_30'] > 50 or dens['pap_30_79'] > 30 or
+                          dens['pap_80_129'] > 20 or dens['over_129'] > 10)
+                else 'Não'
+            )
             final_layer.changeAttributeValue(
                 poly_feature.id(), fidx['Povoamento'], povoamento_value)
 
@@ -710,7 +771,6 @@ class PovoamentosSbAzPlugin:
         )
         if count == 0:
             return None
-
         result = processing.run('native:extractbyexpression', {
             'INPUT': classes_pap_layer,
             'EXPRESSION': '"Povoamento" = \'Sim\' OR "Pov_Repescagem" = \'Sim\'',
@@ -729,7 +789,6 @@ class PovoamentosSbAzPlugin:
         temp_layer = QgsVectorLayer(
             f'Polygon?crs={small_areas_layer.crs().authid()}', 'temp', 'memory')
         temp_layer.startEditing()
-
         for field in small_areas_layer.fields():
             temp_layer.addAttribute(field)
         temp_layer.addAttribute(QgsField('n_total',         QVariant.Int))
@@ -745,7 +804,6 @@ class PovoamentosSbAzPlugin:
             for field in small_areas_layer.fields():
                 new_feat[field.name()] = src_feature[field.name()]
             temp_layer.addFeature(new_feat)
-
         temp_layer.commitChanges()
         temp_layer.startEditing()
 
@@ -754,8 +812,7 @@ class PovoamentosSbAzPlugin:
         avg_pap_idx         = temp_layer.fields().indexOf('avg_PAP')
         pap_class_idx       = temp_layer.fields().indexOf('pap_class')
         meets_threshold_idx = temp_layer.fields().indexOf('meets_threshold')
-
-        class_thresholds = {1: 50, 2: 30, 3: 20, 4: 10}
+        class_thresholds    = {1: 50, 2: 30, 3: 20, 4: 10}
 
         for poly_feature in temp_layer.getFeatures():
             poly_geom = poly_feature.geometry()
@@ -775,26 +832,17 @@ class PovoamentosSbAzPlugin:
                     sum_pap += pap_value
 
             temp_layer.changeAttributeValue(poly_feature.id(), n_total_idx, point_count)
-
             density = (point_count / poly_area) if poly_area and poly_area > 0 else 0
             temp_layer.changeAttributeValue(poly_feature.id(), dens_total_idx, density)
 
             if point_count > 0:
                 avg_pap = sum_pap / point_count
                 temp_layer.changeAttributeValue(poly_feature.id(), avg_pap_idx, avg_pap)
-
-                if avg_pap < 30:
-                    pap_class = 1
-                elif avg_pap < 80:
-                    pap_class = 2
-                elif avg_pap < 130:
-                    pap_class = 3
-                else:
-                    pap_class = 4
-
+                pap_class = (1 if avg_pap < 30 else
+                             2 if avg_pap < 80 else
+                             3 if avg_pap < 130 else 4)
                 temp_layer.changeAttributeValue(poly_feature.id(), pap_class_idx, pap_class)
-                threshold = class_thresholds.get(pap_class, 0)
-                meets = 'Sim' if density > threshold else 'Não'
+                meets = 'Sim' if density > class_thresholds.get(pap_class, 0) else 'Não'
                 temp_layer.changeAttributeValue(
                     poly_feature.id(), meets_threshold_idx, meets)
             else:
@@ -807,7 +855,7 @@ class PovoamentosSbAzPlugin:
 
         fields_to_keep = {'area_ha', 'n_total', 'dens_total', 'avg_PAP', 'pap_class'}
 
-        def _finalise_layer(raw_layer, layer_name, id_field_name):
+        def _finalise(raw_layer, layer_name, id_field_name):
             if raw_layer.featureCount() == 0:
                 return None
             raw_layer.setName(layer_name)
@@ -834,18 +882,133 @@ class PovoamentosSbAzPlugin:
 
         pequeno_result = processing.run('native:extractbyexpression', {
             'INPUT': temp_layer,
-            'EXPRESSION': '"meets_threshold" = \'Sim\'',
-            'OUTPUT': 'memory:'
+            'EXPRESSION': '"meets_threshold" = \'Sim\'', 'OUTPUT': 'memory:'
         })
-        pequeno_layer = _finalise_layer(
-            pequeno_result['OUTPUT'], 'PEQUENO_NUCLEO', 'n_nucleo')
-
         outros_result = processing.run('native:extractbyexpression', {
             'INPUT': temp_layer,
-            'EXPRESSION': '"meets_threshold" = \'Não\'',
+            'EXPRESSION': '"meets_threshold" = \'Não\'', 'OUTPUT': 'memory:'
+        })
+        return (_finalise(pequeno_result['OUTPUT'], 'PEQUENO_NUCLEO', 'n_nucleo'),
+                _finalise(outros_result['OUTPUT'], 'OUTROS', 'n_outros'))
+
+    def create_afectacao_layers(self, povoamento_layer, source_layer):
+        """Step 7 (optional): Calculate direct affectation of infrastructure."""
+
+        # Validate and collect infrastructure layers
+        infra_layers = []
+        for layer_id in self.infra_layer_ids:
+            layer = QgsProject.instance().mapLayer(layer_id)
+            if not layer:
+                continue
+            if layer.geometryType() != QgsWkbTypes.PolygonGeometry:
+                raise Exception(
+                    f"A camada '{layer.name()}' não é uma camada de polígonos. "
+                    "Apenas polígonos são suportados para infraestruturas.")
+            infra_layers.append(layer)
+
+        if not infra_layers:
+            return None, None
+
+        # Combine all infrastructure layers into one dissolved polygon
+        merge_result = processing.run('native:mergevectorlayers', {
+            'LAYERS': infra_layers,
+            'CRS': infra_layers[0].crs().authid(),
             'OUTPUT': 'memory:'
         })
-        outros_layer = _finalise_layer(
-            outros_result['OUTPUT'], 'OUTROS', 'n_outros')
+        dissolve_result = processing.run('native:dissolve', {
+            'INPUT': merge_result['OUTPUT'],
+            'FIELD': [], 'OUTPUT': 'memory:'
+        })
+        infra_total = dissolve_result['OUTPUT']
+        infra_total.setName('INFRAESTRUTURAS_TOTAL')
+        QgsProject.instance().addMapLayer(infra_total)
+        self.log(f'Infraestruturas combinadas: {len(infra_layers)} camada(s)')
 
-        return pequeno_layer, outros_layer
+        # Intersect POVOAMENTO × infrastructure (only if POVOAMENTO exists)
+        areas_afectadas = None
+        if povoamento_layer and povoamento_layer.featureCount() > 0:
+            intersect_result = processing.run('native:intersection', {
+                'INPUT': povoamento_layer,
+                'OVERLAY': infra_total,
+                'INPUT_FIELDS': [],
+                'OVERLAY_FIELDS': [],
+                'OVERLAY_FIELDS_PREFIX': '',
+                'OUTPUT': 'memory:'
+            })
+            intersect_layer = intersect_result['OUTPUT']
+
+            if intersect_layer.featureCount() > 0:
+                area_result = processing.run('native:fieldcalculator', {
+                    'INPUT': intersect_layer,
+                    'FIELD_NAME': 'area_ha_afect',
+                    'FIELD_TYPE': 0,  # Double
+                    'FIELD_LENGTH': 10,
+                    'FIELD_PRECISION': 4,
+                    'FORMULA': '$area / 10000',
+                    'OUTPUT': 'memory:'
+                })
+                areas_afectadas = area_result['OUTPUT']
+                areas_afectadas.setName('AREAS_AFECTADAS')
+                QgsProject.instance().addMapLayer(areas_afectadas)
+            else:
+                self.log('Nenhuma área de povoamento intersecta as infraestruturas')
+
+        # Classify sb_az as 'povoamento' or 'isolados' and find affected trees
+        sb_az_afectados = None
+        if source_layer:
+            # Split trees by whether they're inside POVOAMENTO
+            pov_join = processing.run('native:joinattributesbylocation', {
+                'INPUT': source_layer,
+                'JOIN': povoamento_layer if povoamento_layer else infra_total,
+                'JOIN_FIELDS': [],
+                'METHOD': 0,
+                'PREDICATE': [0],  # intersects
+                'DISCARD_NONMATCHING': True,
+                'PREFIX': '',
+                'NON_MATCHING': 'memory:',
+                'OUTPUT': 'memory:'
+            })
+            sb_in_pov  = pov_join['OUTPUT']
+            sb_isolados = pov_join['NON_MATCHING']
+
+            # Tag each group
+            tagged_pov = processing.run('native:fieldcalculator', {
+                'INPUT': sb_in_pov,
+                'FIELD_NAME': 'POV_ISO', 'FIELD_TYPE': 2,
+                'FIELD_LENGTH': 30, 'FORMULA': "'povoamento'",
+                'OUTPUT': 'memory:'
+            })['OUTPUT']
+
+            tagged_iso = processing.run('native:fieldcalculator', {
+                'INPUT': sb_isolados,
+                'FIELD_NAME': 'POV_ISO', 'FIELD_TYPE': 2,
+                'FIELD_LENGTH': 30, 'FORMULA': "'isolados'",
+                'OUTPUT': 'memory:'
+            })['OUTPUT']
+
+            # Merge both tagged layers
+            merged = processing.run('native:mergevectorlayers', {
+                'LAYERS': [tagged_pov, tagged_iso],
+                'CRS': source_layer.crs().authid(),
+                'OUTPUT': 'memory:'
+            })['OUTPUT']
+
+            # Find trees directly overlapping infrastructure
+            affected = processing.run('native:joinattributesbylocation', {
+                'INPUT': merged,
+                'JOIN': infra_total,
+                'JOIN_FIELDS': [],
+                'METHOD': 0,
+                'PREDICATE': [0],  # intersects
+                'DISCARD_NONMATCHING': True,
+                'PREFIX': '',
+                'OUTPUT': 'memory:'
+            })
+            if affected['OUTPUT'].featureCount() > 0:
+                sb_az_afectados = affected['OUTPUT']
+                sb_az_afectados.setName('SB_AZ_AFECTADOS')
+                QgsProject.instance().addMapLayer(sb_az_afectados)
+            else:
+                self.log('Nenhuma árvore directamente afectada pelas infraestruturas')
+
+        return areas_afectadas, sb_az_afectados
