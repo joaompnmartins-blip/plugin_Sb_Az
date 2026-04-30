@@ -1,0 +1,40 @@
+[general]
+name=Povoamentos Sb Az
+qgisMinimumVersion=3.0
+description=Análise de povoamentos de Sobreiro e Azinheira com classificação por classes de PAP
+version=2.0
+author=Your Name
+email=your.email@example.com
+
+about=Este plugin processa dados de inventário florestal (camada SB_AZ) para:
+    1. Calcular raio de copa (raio_copa) a partir de medições PAP
+    2. Criar buffers individuais de copa (LIMITE_COPAS)
+    3. Gerar camada de continuidade com buffer de 10m dissolvido (LIMITE_CONTINUIDADE)
+    4. Separar áreas por limiar de 0.5 ha
+    5. Analisar classes de PAP para áreas >= 0.5 ha (CLASSES_PAP)
+    6. Filtrar áreas de alta densidade (POVOAMENTO)
+    7. Classificar pequenos núcleos < 0.5 ha (PEQUENO_NUCLEO e OUTROS)
+    
+    O plugin aplica limiares de densidade baseados em classes de PAP para identificar
+    povoamentos produtivos tanto em grandes áreas como em pequenos núcleos.
+
+tracker=https://github.com/yourusername/povoamentos-sb-az/issues
+repository=https://github.com/yourusername/povoamentos-sb-az
+tags=floresta,análise,sobreiro,azinheira,inventário,PAP,povoamento
+
+homepage=https://github.com/yourusername/povoamentos-sb-az
+category=Analysis
+icon=icon.png
+experimental=False
+deprecated=False
+
+changelog=2.0 - Atualização major
+    - Separação de áreas por limiar de 0.5 ha antes da classificação
+    - Aplicação de critérios de povoamento a pequenos núcleos
+    - Criação de camada OUTROS para áreas que não cumprem limiares
+    - Melhorias no processamento e performance
+    1.0 - Lançamento inicial
+    - Cálculo de raio de copa a partir de PAP
+    - Análise multi-camada com buffers
+    - Estatísticas de classes de PAP
+    - Filtragem baseada em densidade
