@@ -141,7 +141,7 @@ class LayerConfigDialog(QDialog):
         self.pap_combo.clear()
         self.alt_1m_combo.clear()
 
-        bool_int_fields = []
+        bool_fields = []
         numeric_fields = []
 
         for field in layer.fields():
@@ -149,19 +149,19 @@ class LayerConfigDialog(QDialog):
             fname = field.name()
             if ftype in (QVariant.Int, QVariant.LongLong, QVariant.Double):
                 numeric_fields.append(fname)
-            if ftype in (QVariant.Bool, QVariant.Int, QVariant.LongLong):
-                bool_int_fields.append(fname)
+            if ftype == QVariant.Bool:
+                bool_fields.append(fname)
 
         for fname in numeric_fields:
             self.raio_copa_combo.addItem(fname, fname)
             self.pap_combo.addItem(fname, fname)
 
-        if bool_int_fields:
-            for fname in bool_int_fields:
+        if bool_fields:
+            for fname in bool_fields:
                 self.alt_1m_combo.addItem(fname, fname)
         else:
-            for field in layer.fields():
-                self.alt_1m_combo.addItem(field.name(), field.name())
+            self.alt_1m_combo.addItem(
+                '— Sem campo booleano (crie um na camada) —', None)
 
         self.raio_copa_combo.blockSignals(False)
         self._on_raio_copa_changed()
@@ -190,9 +190,10 @@ class LayerConfigDialog(QDialog):
             QMessageBox.warning(self, 'Erro',
                 'Não foram encontrados campos numéricos para o campo PAP.')
             return
-        if self.alt_1m_combo.count() == 0:
+        if self.alt_1m_combo.currentData() is None:
             QMessageBox.warning(self, 'Erro',
-                'Não foram encontrados campos para o campo alt_1m.')
+                'A camada não tem nenhum campo booleano para alt_1m. '
+                'Crie um campo do tipo booleano na camada antes de continuar.')
             return
         if self.afect_check.isChecked() and not self._get_selected_infra_ids():
             QMessageBox.warning(self, 'Erro',
