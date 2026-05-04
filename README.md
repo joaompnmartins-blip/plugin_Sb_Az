@@ -21,7 +21,7 @@ Opcionalmente, com selecção de camadas de infraestruturas:
 
 ## Requisitos
 
-- QGIS 3.0 ou superior
+- QGIS 3.34.14 ou superior
 - Uma camada de pontos (qualquer nome) com:
   - Um campo **numérico** com os valores de PAP (Perímetro à Altura do Peito, em cm)
   - Um campo **numérico** com os valores de raio de copa — ou ausente, sendo criado automaticamente
